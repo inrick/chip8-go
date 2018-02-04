@@ -2,18 +2,16 @@ package main
 
 import (
 	"chip8-go/chip8"
+	"errors"
 	"fmt"
 	"github.com/go-gl/gl/v4.1-core/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"os"
 	"runtime"
+	"strings"
 )
 
-const (
-	renderScale = 15
-	// Room to draw all squares, which each require two triangles.
-	vertices = chip8.DisplayWidth * chip8.DisplayHeight * 2 * 2 * 3
-)
+const renderScale = 15
 
 func resizeHandler(w *glfw.Window, width, height int) {
 	gl.Viewport(0, 0, int32(width), int32(height))
@@ -105,39 +103,37 @@ func keyHandler(c8 *chip8.Chip8) glfw.KeyCallback {
 	}
 }
 
-func fillbuf(c8 *chip8.Chip8, buf []float32) int32 {
+func fillElemBuf(c8 *chip8.Chip8, elems []uint32) int32 {
+	w := chip8.DisplayWidth + 1
 	n := int32(0)
-	for i := range c8.Gfx {
-		for j := range c8.Gfx[i] {
-			if c8.Gfx[i][j] == 1 {
-				x := float32(i)
-				y := float32(j)
-				buf[n+0] = x
-				buf[n+1] = y
-				buf[n+2] = x + 1
-				buf[n+3] = y + 1
-				buf[n+4] = x + 1
-				buf[n+5] = y
-				buf[n+6] = x
-				buf[n+7] = y
-				buf[n+8] = x + 1
-				buf[n+9] = y + 1
-				buf[n+10] = x
-				buf[n+11] = y + 1
-				n += 12
+	for y := 0; y < chip8.DisplayHeight; y++ {
+		for x := 0; x < chip8.DisplayWidth; x++ {
+			if c8.Gfx[x][y] == 1 {
+				// Corners of quad
+				q1 := uint32(y*w + x)
+				q2 := uint32(y*w + x + 1)
+				q3 := uint32((y+1)*w + x)
+				q4 := uint32((y+1)*w + x + 1)
+				elems[n+0] = q1
+				elems[n+1] = q2
+				elems[n+2] = q3
+				elems[n+3] = q2
+				elems[n+4] = q3
+				elems[n+5] = q4
+				n += 6
 			}
 		}
 	}
-	return n / 2 // Number of vertices
+	return n // Number of vertices
 }
 
 var (
-	vertexShaderGlsl = fmt.Sprintf(`
+	vertexShaderGlsl = `
 	  #version 410 core
 	  in vec2 pos;
 	  void main() {
-	   gl_Position = vec4(pos.x/%d - 1.0, 1.0 - pos.y/%d, 0, 1.0);
-	  }`, chip8.DisplayWidth/2, chip8.DisplayHeight/2)
+	   gl_Position = vec4(pos, 0.0, 1.0);
+	  }`
 	fragmentShaderGlsl = `
 	  #version 410 core
 	  out vec4 color;
@@ -146,31 +142,65 @@ var (
 	  }`
 )
 
-func glSetup(buf []float32) (vao, vbo uint32, err error) {
+func checkShaderError(shader uint32) error {
+	var status int32
+	gl.GetShaderiv(shader, gl.COMPILE_STATUS, &status)
+	if status == gl.FALSE {
+		log := strings.Repeat("\x00", 512)
+		gl.GetShaderInfoLog(shader, 512, nil, gl.Str(log))
+		return errors.New(log)
+	}
+	return nil
+}
+
+func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
 	if err := gl.Init(); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
 	gl.GenVertexArrays(1, &vao)
 	gl.BindVertexArray(vao)
 
+	// Generate quad vertices
+	w, h := chip8.DisplayWidth+1, chip8.DisplayHeight+1
+	vertices := w * h * 2 // 2 coordinates for each vertex
+	buf := make([]float32, vertices, vertices)
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			i := 2 * (y*w + x)
+			buf[i] = -1 + float32(x)/float32(chip8.DisplayWidth/2)
+			buf[i+1] = 1 - float32(y)/float32(chip8.DisplayHeight/2)
+		}
+	}
+
 	gl.GenBuffers(1, &vbo)
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
-	gl.BufferData(gl.ARRAY_BUFFER, len(buf)*4, gl.Ptr(buf), gl.DYNAMIC_DRAW)
+	gl.BufferData(gl.ARRAY_BUFFER, len(buf)*4, gl.Ptr(buf), gl.STATIC_DRAW)
+
+	gl.GenBuffers(1, &ebo)
+	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
+	gl.BufferData(
+		gl.ELEMENT_ARRAY_BUFFER, len(elems)*4, gl.Ptr(elems), gl.DYNAMIC_DRAW)
 
 	vertexShader := gl.CreateShader(gl.VERTEX_SHADER)
 	cStrVshadeGlsl, freeVertexStr := gl.Strs(vertexShaderGlsl)
+	defer freeVertexStr()
 	gl.ShaderSource(vertexShader, 1, cStrVshadeGlsl, nil)
 	gl.CompileShader(vertexShader)
-	freeVertexStr()
+
+	if err := checkShaderError(vertexShader); err != nil {
+		return vao, vbo, ebo, fmt.Errorf("Vertex shader error: %v", err)
+	}
 
 	fragmentShader := gl.CreateShader(gl.FRAGMENT_SHADER)
 	cStrFshadeGlsl, freeFragmentStr := gl.Strs(fragmentShaderGlsl)
+	defer freeFragmentStr()
 	gl.ShaderSource(fragmentShader, 1, cStrFshadeGlsl, nil)
 	gl.CompileShader(fragmentShader)
-	freeFragmentStr()
 
-	// TODO log shader compilation errors
+	if err := checkShaderError(fragmentShader); err != nil {
+		return vao, vbo, ebo, fmt.Errorf("Fragment shader error: %v", err)
+	}
 
 	program := gl.CreateProgram()
 	gl.AttachShader(program, vertexShader)
@@ -182,6 +212,11 @@ func glSetup(buf []float32) (vao, vbo uint32, err error) {
 	gl.EnableVertexAttribArray(0)
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
 	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, gl.PtrOffset(0))
+
+	if err := gl.GetError(); err != gl.NO_ERROR {
+		return vao, vbo, ebo, fmt.Errorf("GL error: 0x%x", err)
+	}
+
 	return
 }
 
@@ -217,8 +252,9 @@ func main() {
 	}
 	window.MakeContextCurrent()
 
-	buf := make([]float32, vertices, vertices)
-	_, _, err = glSetup(buf)
+	vertices := (chip8.DisplayWidth + 1) * (chip8.DisplayHeight + 1) * 2
+	elems := make([]uint32, vertices, vertices)
+	_, _, _, err = glSetup(elems)
 	if err != nil {
 		panic(err)
 	}
@@ -233,10 +269,11 @@ func main() {
 		}
 		if c8.Draw {
 			gl.Clear(gl.COLOR_BUFFER_BIT)
-			n := fillbuf(c8, buf)
+			n := fillElemBuf(c8, elems)
 			// TODO this shouldn't be needed?
-			gl.BufferData(gl.ARRAY_BUFFER, len(buf)*4, gl.Ptr(buf), gl.DYNAMIC_DRAW)
-			gl.DrawArrays(gl.TRIANGLES, 0, n)
+			gl.BufferData(
+				gl.ELEMENT_ARRAY_BUFFER, len(elems)*4, gl.Ptr(elems), gl.DYNAMIC_DRAW)
+			gl.DrawElements(gl.TRIANGLES, n, gl.UNSIGNED_INT, gl.PtrOffset(0))
 			window.SwapBuffers()
 		}
 		glfw.PollEvents()
