@@ -3,42 +3,19 @@ package main
 import (
 	"chip8-go/chip8"
 	"fmt"
-	"github.com/go-gl/gl/v4.5-compatibility/gl"
+	"github.com/go-gl/gl/v4.1-core/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
 	"os"
 	"runtime"
 )
 
-const renderScale = 15
-
-func drawPoint(x, y int) {
-	xf := float32(x)
-	yf := float32(y)
-	gl.Begin(gl.QUADS)
-	gl.Vertex2f(xf, yf)
-	gl.Vertex2f(xf+1, yf)
-	gl.Vertex2f(xf+1, yf+1)
-	gl.Vertex2f(xf, yf+1)
-	gl.End()
-}
-
-func render(c8 *chip8.Chip8) {
-	gl.Color3f(.85, .85, .85)
-	for i := range c8.Gfx {
-		for j := range c8.Gfx[i] {
-			if c8.Gfx[i][j] == 1 {
-				drawPoint(i, j)
-			}
-		}
-	}
-}
+const (
+	renderScale = 15
+	// Room to draw all squares, which each require two triangles.
+	vertices = chip8.DisplayWidth * chip8.DisplayHeight * 2 * 2 * 3
+)
 
 func resizeHandler(w *glfw.Window, width, height int) {
-	gl.ClearColor(0., 0., 0., 0)
-	gl.MatrixMode(gl.PROJECTION)
-	gl.LoadIdentity()
-	gl.Ortho(0, chip8.DisplayWidth, chip8.DisplayHeight, 0, 0, 1)
-	gl.MatrixMode(gl.MODELVIEW)
 	gl.Viewport(0, 0, int32(width), int32(height))
 }
 
@@ -128,6 +105,86 @@ func keyHandler(c8 *chip8.Chip8) glfw.KeyCallback {
 	}
 }
 
+func fillbuf(c8 *chip8.Chip8, buf []float32) int32 {
+	n := int32(0)
+	for i := range c8.Gfx {
+		for j := range c8.Gfx[i] {
+			if c8.Gfx[i][j] == 1 {
+				x := float32(i)
+				y := float32(j)
+				buf[n+0] = x
+				buf[n+1] = y
+				buf[n+2] = x + 1
+				buf[n+3] = y + 1
+				buf[n+4] = x + 1
+				buf[n+5] = y
+				buf[n+6] = x
+				buf[n+7] = y
+				buf[n+8] = x + 1
+				buf[n+9] = y + 1
+				buf[n+10] = x
+				buf[n+11] = y + 1
+				n += 12
+			}
+		}
+	}
+	return n / 2 // Number of vertices
+}
+
+var (
+	vertexShaderGlsl = fmt.Sprintf(`
+	  #version 410 core
+	  in vec2 pos;
+	  void main() {
+	   gl_Position = vec4(pos.x/%d - 1.0, 1.0 - pos.y/%d, 0, 1.0);
+	  }`, chip8.DisplayWidth/2, chip8.DisplayHeight/2)
+	fragmentShaderGlsl = `
+	  #version 410 core
+	  out vec4 color;
+	  void main() {
+	    color = vec4(0.85, 0.85, 0.85, 1.0);
+	  }`
+)
+
+func glSetup(buf []float32) (vao, vbo uint32, err error) {
+	if err := gl.Init(); err != nil {
+		return 0, 0, err
+	}
+
+	gl.GenVertexArrays(1, &vao)
+	gl.BindVertexArray(vao)
+
+	gl.GenBuffers(1, &vbo)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+	gl.BufferData(gl.ARRAY_BUFFER, len(buf)*4, gl.Ptr(buf), gl.DYNAMIC_DRAW)
+
+	vertexShader := gl.CreateShader(gl.VERTEX_SHADER)
+	cStrVshadeGlsl, freeVertexStr := gl.Strs(vertexShaderGlsl)
+	gl.ShaderSource(vertexShader, 1, cStrVshadeGlsl, nil)
+	gl.CompileShader(vertexShader)
+	freeVertexStr()
+
+	fragmentShader := gl.CreateShader(gl.FRAGMENT_SHADER)
+	cStrFshadeGlsl, freeFragmentStr := gl.Strs(fragmentShaderGlsl)
+	gl.ShaderSource(fragmentShader, 1, cStrFshadeGlsl, nil)
+	gl.CompileShader(fragmentShader)
+	freeFragmentStr()
+
+	// TODO log shader compilation errors
+
+	program := gl.CreateProgram()
+	gl.AttachShader(program, vertexShader)
+	gl.AttachShader(program, fragmentShader)
+	gl.BindFragDataLocation(program, 0, gl.Str("color\x00"))
+	gl.LinkProgram(program)
+	gl.UseProgram(program)
+
+	gl.EnableVertexAttribArray(0)
+	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
+	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, gl.PtrOffset(0))
+	return
+}
+
 func init() {
 	runtime.LockOSThread()
 }
@@ -141,28 +198,45 @@ func main() {
 		panic(err)
 	}
 	defer glfw.Terminate()
+
+	glfw.WindowHint(glfw.ContextVersionMajor, 4)
+	glfw.WindowHint(glfw.ContextVersionMinor, 1)
+	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
+	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
+
 	width := chip8.DisplayWidth * renderScale
 	height := chip8.DisplayHeight * renderScale
 	window, err := glfw.CreateWindow(width, height, "Chip-8", nil, nil)
 	if err != nil {
 		panic(err)
 	}
+
 	c8 := chip8.New()
 	if err := c8.LoadRom(os.Args[1]); err != nil {
 		panic(err)
 	}
 	window.MakeContextCurrent()
-	gl.Init()
+
+	buf := make([]float32, vertices, vertices)
+	_, _, err = glSetup(buf)
+	if err != nil {
+		panic(err)
+	}
+
 	window.SetKeyCallback(keyHandler(c8))
 	window.SetSizeCallback(resizeHandler)
-	resizeHandler(window, width, height)
+
+	gl.ClearColor(.1, .1, .1, 0)
 	for !window.ShouldClose() {
 		if err := c8.Cycle(glfw.WaitEvents); err != nil {
 			panic(err)
 		}
 		if c8.Draw {
 			gl.Clear(gl.COLOR_BUFFER_BIT)
-			render(c8)
+			n := fillbuf(c8, buf)
+			// TODO this shouldn't be needed?
+			gl.BufferData(gl.ARRAY_BUFFER, len(buf)*4, gl.Ptr(buf), gl.DYNAMIC_DRAW)
+			gl.DrawArrays(gl.TRIANGLES, 0, n)
 			window.SwapBuffers()
 		}
 		glfw.PollEvents()
