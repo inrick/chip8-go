@@ -103,9 +103,9 @@ func keyHandler(c8 *chip8.Chip8) glfw.KeyCallback {
 	}
 }
 
-func fillVerticesToDraw(c8 *chip8.Chip8, vertex []uint32) int32 {
+func fillVerticesToDraw(c8 *chip8.Chip8, vertex []uint32) int {
 	h := chip8.DisplayHeight + 1
-	n := int32(0)
+	n := 0
 	for x := range c8.Gfx {
 		for y := range c8.Gfx[x] {
 			if c8.Gfx[x][y] == 1 {
@@ -235,6 +235,8 @@ func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
 	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, gl.PtrOffset(0))
 
+	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
+
 	if err := gl.GetError(); err != gl.NO_ERROR {
 		return nil, vao, vbo, ebo, fmt.Errorf("GL error: 0x%x", err)
 	}
@@ -290,10 +292,8 @@ func main() {
 		if c8.Draw {
 			gl.Clear(gl.COLOR_BUFFER_BIT)
 			n := fillVerticesToDraw(c8, vertex)
-			// TODO this shouldn't be needed?
-			gl.BufferData(
-				gl.ELEMENT_ARRAY_BUFFER, len(vertex)*4, gl.Ptr(vertex), gl.DYNAMIC_DRAW)
-			gl.DrawElements(gl.TRIANGLES, n, gl.UNSIGNED_INT, gl.PtrOffset(0))
+			gl.BufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, n*4, gl.Ptr(vertex))
+			gl.DrawElements(gl.TRIANGLES, int32(n), gl.UNSIGNED_INT, gl.PtrOffset(0))
 			window.SwapBuffers()
 		}
 		glfw.PollEvents()
