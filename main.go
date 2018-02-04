@@ -103,7 +103,7 @@ func keyHandler(c8 *chip8.Chip8) glfw.KeyCallback {
 	}
 }
 
-func fillElemBuf(c8 *chip8.Chip8, elems []uint32) int32 {
+func fillVerticesToDraw(c8 *chip8.Chip8, vertex []uint32) int32 {
 	h := chip8.DisplayHeight + 1
 	n := int32(0)
 	for x := range c8.Gfx {
@@ -114,12 +114,12 @@ func fillElemBuf(c8 *chip8.Chip8, elems []uint32) int32 {
 				q2 := uint32(x*h + y + 1)
 				q3 := uint32((x+1)*h + y)
 				q4 := uint32((x+1)*h + y + 1)
-				elems[n+0] = q1
-				elems[n+1] = q2
-				elems[n+2] = q3
-				elems[n+3] = q2
-				elems[n+4] = q3
-				elems[n+5] = q4
+				vertex[n+0] = q1
+				vertex[n+1] = q2
+				vertex[n+2] = q3
+				vertex[n+3] = q2
+				vertex[n+4] = q3
+				vertex[n+5] = q4
 				n += 6
 			}
 		}
@@ -153,9 +153,9 @@ func checkShaderError(shader uint32) error {
 	return nil
 }
 
-func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
+func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
 	if err := gl.Init(); err != nil {
-		return 0, 0, 0, err
+		return nil, 0, 0, 0, err
 	}
 
 	gl.GenVertexArrays(1, &vao)
@@ -183,8 +183,8 @@ func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
 	// 32    | . . . . . . . . . . |
 	//       +---------------------+
 	w, h := chip8.DisplayWidth+1, chip8.DisplayHeight+1
-	vertices := w * h * 2 // 2 coordinates for each vertex
-	buf := make([]float32, vertices, vertices)
+	ncoords := w * h * 2 // 2 coordinates for each vertex
+	buf := make([]float32, ncoords, ncoords)
 	for x := 0; x < w; x++ {
 		for y := 0; y < h; y++ {
 			i := 2 * (x*h + y)
@@ -197,10 +197,12 @@ func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
 	gl.BufferData(gl.ARRAY_BUFFER, len(buf)*4, gl.Ptr(buf), gl.STATIC_DRAW)
 
+	vertex = make([]uint32, ncoords/2, ncoords/2)
+
 	gl.GenBuffers(1, &ebo)
 	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
 	gl.BufferData(
-		gl.ELEMENT_ARRAY_BUFFER, len(elems)*4, gl.Ptr(elems), gl.DYNAMIC_DRAW)
+		gl.ELEMENT_ARRAY_BUFFER, len(vertex)*4, gl.Ptr(vertex), gl.DYNAMIC_DRAW)
 
 	vertexShader := gl.CreateShader(gl.VERTEX_SHADER)
 	cStrVshadeGlsl, freeVertexStr := gl.Strs(vertexShaderGlsl)
@@ -209,7 +211,7 @@ func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
 	gl.CompileShader(vertexShader)
 
 	if err := checkShaderError(vertexShader); err != nil {
-		return vao, vbo, ebo, fmt.Errorf("Vertex shader error: %v", err)
+		return nil, vao, vbo, ebo, fmt.Errorf("Vertex shader error: %v", err)
 	}
 
 	fragmentShader := gl.CreateShader(gl.FRAGMENT_SHADER)
@@ -219,7 +221,7 @@ func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
 	gl.CompileShader(fragmentShader)
 
 	if err := checkShaderError(fragmentShader); err != nil {
-		return vao, vbo, ebo, fmt.Errorf("Fragment shader error: %v", err)
+		return nil, vao, vbo, ebo, fmt.Errorf("Fragment shader error: %v", err)
 	}
 
 	program := gl.CreateProgram()
@@ -234,10 +236,10 @@ func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
 	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, gl.PtrOffset(0))
 
 	if err := gl.GetError(); err != gl.NO_ERROR {
-		return vao, vbo, ebo, fmt.Errorf("GL error: 0x%x", err)
+		return nil, vao, vbo, ebo, fmt.Errorf("GL error: 0x%x", err)
 	}
 
-	return vao, vbo, ebo, nil
+	return vertex, vao, vbo, ebo, nil
 }
 
 func init() {
@@ -272,9 +274,7 @@ func main() {
 	}
 	window.MakeContextCurrent()
 
-	vertices := (chip8.DisplayWidth + 1) * (chip8.DisplayHeight + 1) * 2
-	elems := make([]uint32, vertices, vertices)
-	_, _, _, err = glSetup(elems)
+	vertex, _, _, _, err := glSetup()
 	if err != nil {
 		panic(err)
 	}
@@ -289,10 +289,10 @@ func main() {
 		}
 		if c8.Draw {
 			gl.Clear(gl.COLOR_BUFFER_BIT)
-			n := fillElemBuf(c8, elems)
+			n := fillVerticesToDraw(c8, vertex)
 			// TODO this shouldn't be needed?
 			gl.BufferData(
-				gl.ELEMENT_ARRAY_BUFFER, len(elems)*4, gl.Ptr(elems), gl.DYNAMIC_DRAW)
+				gl.ELEMENT_ARRAY_BUFFER, len(vertex)*4, gl.Ptr(vertex), gl.DYNAMIC_DRAW)
 			gl.DrawElements(gl.TRIANGLES, n, gl.UNSIGNED_INT, gl.PtrOffset(0))
 			window.SwapBuffers()
 		}
