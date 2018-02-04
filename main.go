@@ -1,11 +1,11 @@
 package main
 
 import (
-	"chip8-go/chip8"
 	"errors"
 	"fmt"
 	"github.com/go-gl/gl/v4.1-core/gl"
 	"github.com/go-gl/glfw/v3.2/glfw"
+	"github.com/inrick/chip8-go/chip8"
 	"os"
 	"runtime"
 	"strings"
