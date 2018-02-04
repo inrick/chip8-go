@@ -237,7 +237,7 @@ func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
 		return vao, vbo, ebo, fmt.Errorf("GL error: 0x%x", err)
 	}
 
-	return
+	return vao, vbo, ebo, nil
 }
 
 func init() {
