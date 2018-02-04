@@ -67,16 +67,12 @@ func (c8 *Chip8) LoadRom(romPath string) error {
 		return fmt.Errorf("Error reading ROM file: %v", err)
 	}
 	defer rom.Close()
-	buffer := make([]uint8, maxRomSize+1)
-	bytesRead, err := rom.Read(buffer)
+	bytesRead, err := rom.Read(c8.mem[0x200:])
 	if err != nil {
 		return fmt.Errorf("Error reading ROM file: %v", err)
 	}
 	if bytesRead > maxRomSize {
 		return errors.New("ROM file too big")
-	}
-	for i := 0; i < bytesRead; i++ {
-		c8.mem[0x200+i] = buffer[i]
 	}
 	return nil
 }
