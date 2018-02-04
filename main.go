@@ -104,16 +104,16 @@ func keyHandler(c8 *chip8.Chip8) glfw.KeyCallback {
 }
 
 func fillElemBuf(c8 *chip8.Chip8, elems []uint32) int32 {
-	w := chip8.DisplayWidth + 1
+	h := chip8.DisplayHeight + 1
 	n := int32(0)
-	for y := 0; y < chip8.DisplayHeight; y++ {
-		for x := 0; x < chip8.DisplayWidth; x++ {
+	for x := range c8.Gfx {
+		for y := range c8.Gfx[x] {
 			if c8.Gfx[x][y] == 1 {
 				// Corners of quad
-				q1 := uint32(y*w + x)
-				q2 := uint32(y*w + x + 1)
-				q3 := uint32((y+1)*w + x)
-				q4 := uint32((y+1)*w + x + 1)
+				q1 := uint32(x*h + y)
+				q2 := uint32(x*h + y + 1)
+				q3 := uint32((x+1)*h + y)
+				q4 := uint32((x+1)*h + y + 1)
 				elems[n+0] = q1
 				elems[n+1] = q2
 				elems[n+2] = q3
@@ -161,13 +161,33 @@ func glSetup(elems []uint32) (vao, vbo, ebo uint32, err error) {
 	gl.GenVertexArrays(1, &vao)
 	gl.BindVertexArray(vao)
 
-	// Generate quad vertices
+	// Generate quad vertices.
+	//
+	// See the display pictured below. The vertices are numbered starting
+	// from the top left and going down, proceeding right after the last row is
+	// reached. The vertex at position (x,y) is numbered 33*x+y:
+	//   - (0,0) is vertex 0
+	//   - (0,1) is vertex 1
+	//   - (1,0) is vertex 33
+	//   - etc.
+	//
+	// The numbering is chosen to match the layout of chip8.Chip8.Gfx.
+	//
+	//      x  0 1     ...      64
+	//      --->
+	//  y |
+	//    |  +---------------------+
+	//  0 v  | . . . . . . . . . . |
+	//  1    | . . . . . . . . . . |
+	// ...   | . . . . . . . . . . |
+	// 32    | . . . . . . . . . . |
+	//       +---------------------+
 	w, h := chip8.DisplayWidth+1, chip8.DisplayHeight+1
 	vertices := w * h * 2 // 2 coordinates for each vertex
 	buf := make([]float32, vertices, vertices)
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			i := 2 * (y*w + x)
+	for x := 0; x < w; x++ {
+		for y := 0; y < h; y++ {
+			i := 2 * (x*h + y)
 			buf[i] = -1 + float32(x)/float32(chip8.DisplayWidth/2)
 			buf[i+1] = 1 - float32(y)/float32(chip8.DisplayHeight/2)
 		}
