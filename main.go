@@ -197,7 +197,8 @@ func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
 	gl.BufferData(gl.ARRAY_BUFFER, len(buf)*4, gl.Ptr(buf), gl.STATIC_DRAW)
 
-	vertex = make([]uint32, ncoords/2, ncoords/2)
+	// 65*33 quads, each quad needs 6 vertices
+	vertex = make([]uint32, ncoords*3, ncoords*3)
 
 	gl.GenBuffers(1, &ebo)
 	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
