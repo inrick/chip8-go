@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"time"
 )
 
 const (
@@ -50,6 +51,7 @@ type Chip8 struct {
 	i, pc  uint16
 	sp     uint8
 	dt, st uint8 // Delay timer & sound timer
+	timer  *time.Ticker
 }
 
 func New() *Chip8 {
@@ -58,6 +60,7 @@ func New() *Chip8 {
 		c8.mem[i] = x
 	}
 	c8.pc = 0x200
+	c8.timer = time.NewTicker(time.Second / 60)
 	return c8
 }
 
@@ -326,13 +329,17 @@ func (c8 *Chip8) Cycle(waitForInput func()) error {
 	default:
 		goto Unknown
 	}
-	// TODO timers should be decremented at 60 hz rate
-	if c8.dt > 0 {
-		c8.dt--
-	}
-	if c8.st > 0 {
-		fmt.Print("\a")
-		c8.st--
+	// Decrement timers at 60 hz rate. See Cowgod's reference [1].
+	select {
+	case <-c8.timer.C:
+		if c8.dt > 0 {
+			c8.dt--
+		}
+		if c8.st > 0 {
+			fmt.Print("\a")
+			c8.st--
+		}
+	default:
 	}
 	return nil
 Unknown:
