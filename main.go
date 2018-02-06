@@ -146,8 +146,10 @@ func checkShaderError(shader uint32) error {
 	var status int32
 	gl.GetShaderiv(shader, gl.COMPILE_STATUS, &status)
 	if status == gl.FALSE {
-		log := strings.Repeat("\x00", 512)
-		gl.GetShaderInfoLog(shader, 512, nil, gl.Str(log))
+		var length int32
+		gl.GetShaderiv(shader, gl.INFO_LOG_LENGTH, &length)
+		log := strings.Repeat("\x00", 1+int(length))
+		gl.GetShaderInfoLog(shader, length, nil, gl.Str(log))
 		return errors.New(log)
 	}
 	return nil
