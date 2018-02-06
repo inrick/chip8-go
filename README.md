@@ -5,6 +5,8 @@ Another naive Chip-8 interpreter. Ported an
 [old C implementation](https://github.com/inrick/CHIP-8) to test Go. By now a
 few things differ.
 
+![Chip-8](./chip8.png)
+
 References
 ----------
 
