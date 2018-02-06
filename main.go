@@ -234,6 +234,16 @@ func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
 	gl.LinkProgram(program)
 	gl.UseProgram(program)
 
+	var status int32
+	gl.GetProgramiv(program, gl.LINK_STATUS, &status)
+	if status == gl.FALSE {
+		var length int32
+		gl.GetProgramiv(program, gl.INFO_LOG_LENGTH, &length)
+		log := strings.Repeat("\x00", 1+int(length))
+		gl.GetProgramInfoLog(program, length, nil, gl.Str(log))
+		return nil, vao, vbo, ebo, fmt.Errorf("Program link error: %s", log)
+	}
+
 	gl.EnableVertexAttribArray(0)
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
 	gl.VertexAttribPointer(0, 2, gl.FLOAT, false, 0, gl.PtrOffset(0))
