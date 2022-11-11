@@ -3,12 +3,14 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/go-gl/gl/v4.1-core/gl"
-	"github.com/go-gl/glfw/v3.2/glfw"
-	"github.com/inrick/chip8-go/chip8"
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/go-gl/gl/v4.1-core/gl"
+	"github.com/go-gl/glfw/v3.2/glfw"
+
+	"chip8-go/chip8"
 )
 
 const renderScale = 15
@@ -128,18 +130,16 @@ func fillVerticesToDraw(c8 *chip8.Chip8, vertex []uint32) int {
 }
 
 var (
-	vertexShaderGlsl = `
-	  #version 410 core
-	  in vec2 pos;
-	  void main() {
-	   gl_Position = vec4(pos, 0.0, 1.0);
-	  }`
-	fragmentShaderGlsl = `
-	  #version 410 core
-	  out vec4 color;
-	  void main() {
-	    color = vec4(0.85, 0.85, 0.85, 1.0);
-	  }`
+	vertexShaderGlsl = `#version 410 core
+in vec2 pos;
+void main() {
+	gl_Position = vec4(pos, 0.0, 1.0);
+}` + "\x00"
+	fragmentShaderGlsl = `#version 410 core
+out vec4 color;
+void main() {
+	color = vec4(0.85, 0.85, 0.85, 1.0);
+}` + "\x00"
 )
 
 func checkShaderError(shader uint32) error {
