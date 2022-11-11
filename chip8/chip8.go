@@ -2,8 +2,8 @@
 // Follows description in Cowgod's Chip-8 Technical Reference v1.0 [1] and
 // How to write an emulator [2].
 //
-//   [1] http://devernay.free.fr/hacks/chip8/C8TECH10.HTM
-//   [2] http://www.multigesture.net/articles/how-to-write-an-emulator-chip-8-interpreter/
+//	[1] http://devernay.free.fr/hacks/chip8/C8TECH10.HTM
+//	[2] http://www.multigesture.net/articles/how-to-write-an-emulator-chip-8-interpreter/
 package chip8
 
 import (
@@ -111,7 +111,7 @@ func (c8 *Chip8) Cycle(waitForInput func()) error {
 		default:
 			// 0nnn - SYS addr -- Jump to a machine code routine at nnn.
 			// Apparently ignored in modern interpreters.
-			goto Unknown
+			return errUnknown(op)
 		}
 		c8.incPc(false)
 	case 0x1000:
@@ -140,7 +140,7 @@ func (c8 *Chip8) Cycle(waitForInput func()) error {
 			y := uint8((op & 0xf0) >> 4)
 			c8.incPc(c8.v[x] == c8.v[y])
 		default:
-			goto Unknown
+			return errUnknown(op)
 		}
 	case 0x6000:
 		// 6xkk - LD Vx, byte -- Set Vx = kk.
@@ -207,7 +207,7 @@ func (c8 *Chip8) Cycle(waitForInput func()) error {
 			c8.v[0xf] = (x & 0x80) >> 7
 			c8.v[x] <<= 1
 		default:
-			goto Unknown
+			return errUnknown(op)
 		}
 		c8.incPc(false)
 	case 0x9000:
@@ -218,7 +218,7 @@ func (c8 *Chip8) Cycle(waitForInput func()) error {
 			y := uint8((op & 0xf0) >> 4)
 			c8.incPc(c8.v[x] != c8.v[y])
 		default:
-			goto Unknown
+			return errUnknown(op)
 		}
 	case 0xa000:
 		// Annn - LD I, addr -- Set I = nnn.
@@ -268,7 +268,7 @@ func (c8 *Chip8) Cycle(waitForInput func()) error {
 			// not pressed.
 			c8.incPc(!c8.Key[c8.v[x]])
 		default:
-			goto Unknown
+			return errUnknown(op)
 		}
 	case 0xf000:
 		x := uint8((op & 0xf00) >> 8)
@@ -323,11 +323,11 @@ func (c8 *Chip8) Cycle(waitForInput func()) error {
 				c8.v[i] = c8.mem[c8.i+uint16(i)]
 			}
 		default:
-			goto Unknown
+			return errUnknown(op)
 		}
 		c8.incPc(false)
 	default:
-		goto Unknown
+		return errUnknown(op)
 	}
 	// Decrement timers at 60 hz rate. See Cowgod's reference [1].
 	select {
@@ -342,6 +342,8 @@ func (c8 *Chip8) Cycle(waitForInput func()) error {
 	default:
 	}
 	return nil
-Unknown:
+}
+
+func errUnknown(op uint16) error {
 	return fmt.Errorf("Unknown opcode 0x%x", op)
 }

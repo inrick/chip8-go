@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"runtime"
 	"strings"
@@ -14,6 +15,70 @@ import (
 )
 
 const renderScale = 15
+
+func init() {
+	runtime.LockOSThread()
+}
+
+func main() {
+	log.SetFlags(0)
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	if len(os.Args) != 2 {
+		return fmt.Errorf("Usage: %s <rom file>\n", os.Args[0])
+	}
+	c8 := chip8.New()
+	if err := c8.LoadRom(os.Args[1]); err != nil {
+		return err
+	}
+
+	if err := glfw.Init(); err != nil {
+		return err
+	}
+	defer glfw.Terminate()
+
+	glfw.WindowHint(glfw.ContextVersionMajor, 4)
+	glfw.WindowHint(glfw.ContextVersionMinor, 1)
+	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
+	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
+
+	width := chip8.DisplayWidth * renderScale
+	height := chip8.DisplayHeight * renderScale
+	window, err := glfw.CreateWindow(width, height, "Chip-8", nil, nil)
+	if err != nil {
+		return err
+	}
+
+	window.MakeContextCurrent()
+
+	vertex, err := glSetup()
+	if err != nil {
+		return err
+	}
+
+	window.SetKeyCallback(keyHandler(c8))
+	window.SetSizeCallback(resizeHandler)
+
+	gl.ClearColor(.1, .1, .1, 0)
+	for !window.ShouldClose() {
+		if err := c8.Cycle(glfw.WaitEvents); err != nil {
+			return err
+		}
+		if c8.Draw {
+			gl.Clear(gl.COLOR_BUFFER_BIT)
+			n := fillVerticesToDraw(c8, vertex)
+			gl.BufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, n*4, gl.Ptr(vertex))
+			gl.DrawElements(gl.TRIANGLES, int32(n), gl.UNSIGNED_INT, gl.PtrOffset(0))
+			window.SwapBuffers()
+		}
+		glfw.PollEvents()
+	}
+	return nil
+}
 
 func resizeHandler(w *glfw.Window, width, height int) {
 	gl.Viewport(0, 0, int32(width), int32(height))
@@ -155,11 +220,12 @@ func checkShaderError(shader uint32) error {
 	return nil
 }
 
-func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
+func glSetup() (vertex []uint32, err error) {
 	if err := gl.Init(); err != nil {
-		return nil, 0, 0, 0, err
+		return nil, err
 	}
 
+	var vao uint32
 	gl.GenVertexArrays(1, &vao)
 	gl.BindVertexArray(vao)
 
@@ -195,6 +261,7 @@ func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
 		}
 	}
 
+	var vbo uint32
 	gl.GenBuffers(1, &vbo)
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
 	gl.BufferData(gl.ARRAY_BUFFER, len(buf)*4, gl.Ptr(buf), gl.STATIC_DRAW)
@@ -202,29 +269,30 @@ func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
 	// 65*33 quads, each quad needs 6 vertices
 	vertex = make([]uint32, ncoords*3, ncoords*3)
 
+	var ebo uint32
 	gl.GenBuffers(1, &ebo)
 	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
 	gl.BufferData(
 		gl.ELEMENT_ARRAY_BUFFER, len(vertex)*4, gl.Ptr(vertex), gl.DYNAMIC_DRAW)
 
 	vertexShader := gl.CreateShader(gl.VERTEX_SHADER)
-	cStrVshadeGlsl, freeVertexStr := gl.Strs(vertexShaderGlsl)
-	defer freeVertexStr()
-	gl.ShaderSource(vertexShader, 1, cStrVshadeGlsl, nil)
+	vertexShaderCStr := gl.Str(vertexShaderGlsl)
+	gl.ShaderSource(vertexShader, 1, &vertexShaderCStr, nil)
 	gl.CompileShader(vertexShader)
+	defer gl.DeleteShader(vertexShader)
 
 	if err := checkShaderError(vertexShader); err != nil {
-		return nil, vao, vbo, ebo, fmt.Errorf("Vertex shader error: %v", err)
+		return nil, fmt.Errorf("Vertex shader error: %v", err)
 	}
 
 	fragmentShader := gl.CreateShader(gl.FRAGMENT_SHADER)
-	cStrFshadeGlsl, freeFragmentStr := gl.Strs(fragmentShaderGlsl)
-	defer freeFragmentStr()
-	gl.ShaderSource(fragmentShader, 1, cStrFshadeGlsl, nil)
+	fragmentShaderCStr := gl.Str(fragmentShaderGlsl)
+	gl.ShaderSource(fragmentShader, 1, &fragmentShaderCStr, nil)
 	gl.CompileShader(fragmentShader)
+	defer gl.DeleteShader(fragmentShader)
 
 	if err := checkShaderError(fragmentShader); err != nil {
-		return nil, vao, vbo, ebo, fmt.Errorf("Fragment shader error: %v", err)
+		return nil, fmt.Errorf("Fragment shader error: %v", err)
 	}
 
 	program := gl.CreateProgram()
@@ -241,7 +309,7 @@ func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
 		gl.GetProgramiv(program, gl.INFO_LOG_LENGTH, &length)
 		log := strings.Repeat("\x00", 1+int(length))
 		gl.GetProgramInfoLog(program, length, nil, gl.Str(log))
-		return nil, vao, vbo, ebo, fmt.Errorf("Program link error: %s", log)
+		return nil, fmt.Errorf("Program link error: %s", log)
 	}
 
 	gl.EnableVertexAttribArray(0)
@@ -251,64 +319,8 @@ func glSetup() (vertex []uint32, vao, vbo, ebo uint32, err error) {
 	gl.BindBuffer(gl.ELEMENT_ARRAY_BUFFER, ebo)
 
 	if err := gl.GetError(); err != gl.NO_ERROR {
-		return nil, vao, vbo, ebo, fmt.Errorf("GL error: 0x%x", err)
+		return nil, fmt.Errorf("GL error: 0x%x", err)
 	}
 
-	return vertex, vao, vbo, ebo, nil
-}
-
-func init() {
-	runtime.LockOSThread()
-}
-
-func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <rom file>\n", os.Args[0])
-		os.Exit(1)
-	}
-	if err := glfw.Init(); err != nil {
-		panic(err)
-	}
-	defer glfw.Terminate()
-
-	glfw.WindowHint(glfw.ContextVersionMajor, 4)
-	glfw.WindowHint(glfw.ContextVersionMinor, 1)
-	glfw.WindowHint(glfw.OpenGLProfile, glfw.OpenGLCoreProfile)
-	glfw.WindowHint(glfw.OpenGLForwardCompatible, glfw.True)
-
-	width := chip8.DisplayWidth * renderScale
-	height := chip8.DisplayHeight * renderScale
-	window, err := glfw.CreateWindow(width, height, "Chip-8", nil, nil)
-	if err != nil {
-		panic(err)
-	}
-
-	c8 := chip8.New()
-	if err := c8.LoadRom(os.Args[1]); err != nil {
-		panic(err)
-	}
-	window.MakeContextCurrent()
-
-	vertex, _, _, _, err := glSetup()
-	if err != nil {
-		panic(err)
-	}
-
-	window.SetKeyCallback(keyHandler(c8))
-	window.SetSizeCallback(resizeHandler)
-
-	gl.ClearColor(.1, .1, .1, 0)
-	for !window.ShouldClose() {
-		if err := c8.Cycle(glfw.WaitEvents); err != nil {
-			panic(err)
-		}
-		if c8.Draw {
-			gl.Clear(gl.COLOR_BUFFER_BIT)
-			n := fillVerticesToDraw(c8, vertex)
-			gl.BufferSubData(gl.ELEMENT_ARRAY_BUFFER, 0, n*4, gl.Ptr(vertex))
-			gl.DrawElements(gl.TRIANGLES, int32(n), gl.UNSIGNED_INT, gl.PtrOffset(0))
-			window.SwapBuffers()
-		}
-		glfw.PollEvents()
-	}
+	return vertex, nil
 }
